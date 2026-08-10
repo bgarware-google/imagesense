@@ -126,10 +126,6 @@ ImageStudio/
 
 ---
 
-## 👥 Authors
+## 👤 Author
 * **Bhushan Garware**
-* **Snehal Belikatte**
-* **Rohit Naidu**
-* **Suddhasatwa Bhaumik**
-* **Parag Mhatre**
-* **Anibha Athalye**
+

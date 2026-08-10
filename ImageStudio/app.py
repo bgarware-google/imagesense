@@ -699,7 +699,7 @@ with gr.Blocks(title="Image Studio") as demo:
     # Footer
     gr.HTML("""
         <div style='text-align: center; margin-top: 30px; padding: 15px; color: #64748B; font-size: 0.9rem; border-top: 1px solid #E2E8F0;'>
-            Authors: <strong>Bhushan Garware</strong>, <strong>Snehal Belikatte</strong>, <strong>Rohit Naidu</strong>, <strong>Suddhasatwa Bhaumik</strong>, <strong>Parag Mhatre</strong>, <strong>Anibha Athalye</strong>
+            Author: <strong>Bhushan Garware</strong>
         </div>
     """)
 
