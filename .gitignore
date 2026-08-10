@@ -32,5 +32,11 @@
 .idea/
 *.swp
 *.swo
-.ipynb_checkpoints/
+# Terraform local files & state
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
 Deffensive_Publication_Draft.pdf
+
