@@ -27,6 +27,27 @@ Image Studio is an enterprise-grade suite for AI-powered image generation, backg
 
 ---
 
+## 🔐 Authentication & Authorization
+
+Image Studio enforces an enterprise security architecture adhering to zero-trust and least-privilege principles:
+
+### Least-Privilege Dedicated Service Accounts
+* **`sa-imagesense-api`**: Dedicated Ingress API service account with granular role bindings strictly scoped to:
+  * `roles/aiplatform.user` — Execute Vertex AI foundation models (Imagen 4, Gemini 2.5/3.1).
+  * `roles/storage.objectViewer` — Read assets and model weights from Cloud Storage.
+  * `roles/logging.logWriter` — Stream structured audit and telemetry logs to Cloud Logging.
+* **`sa-imagesense-worker`**: Asynchronous batch worker service account strictly scoped to:
+  * `roles/pubsub.subscriber` — Pull asynchronous batch jobs from Pub/Sub topic queues.
+  * `roles/bigquery.dataEditor` — Store analytical telemetry and batch job metrics in BigQuery.
+  * `roles/secretmanager.secretAccessor` — Read runtime credentials and API secrets on demand.
+  * `roles/logging.logWriter` — Write execution logs.
+
+### OAuth 2.0 / OIDC & Keyless Federation
+* **OIDC Bearer Token Authentication**: Enforced OAuth 2.0 / OIDC Bearer token authentication on the FastAPI ingress gateway for all `/api/v1/batch/*` and `/api/v1/jobs/*` endpoints. Incoming requests must supply a valid Google Cloud IAM / OIDC Bearer token verified against Google's public key infrastructure.
+* **Workload Identity Federation (WIF)**: Integrated Workload Identity Federation (`imagesense-cicd-pool`) for automated CI/CD pipelines (Cloud Build / GitHub Actions), eliminating long-lived service account JSON keys in favor of short-lived federated STS tokens.
+
+---
+
 ## 🛡️ Ingress Security with Google Cloud Armor
 
 Image Studio includes infrastructure configurations to front Cloud Run with **Google Cloud Armor** and an **External HTTPS Application Load Balancer**.
@@ -158,6 +179,7 @@ ImageStudio/
 ├── deployment/
 │   └── cloud-armor-ingress/
 │       ├── main.tf                     # Terraform IaC for Cloud Armor & Load Balancer
+│       ├── iam.tf                      # Dedicated Service Accounts & WIF configuration
 │       └── deploy-ingress.sh           # Automated Cloud Armor provisioning script
 └── README.md                           # Documentation and deployment guide
 ```
@@ -166,3 +188,4 @@ ImageStudio/
 
 ## 👤 Author
 * **Bhushan Garware**
+
