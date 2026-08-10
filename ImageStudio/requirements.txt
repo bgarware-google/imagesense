@@ -3,6 +3,7 @@ google-cloud-aiplatform>=1.60.0
 google-genai>=1.0.0
 google-cloud-dlp>=3.15.0
 google-cloud-kms>=2.20.0
+google-cloud-discoveryengine>=0.20.0
 fastapi>=0.110.0
 uvicorn>=0.29.0
 pillow>=10.0.0

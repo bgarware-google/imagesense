@@ -186,7 +186,7 @@ output:"""
 
 
 # ==============================================================================
-# Vertex AI Multimodal Vector Search & Semantic Image Datastore Engine
+# Vertex AI Search (Discovery Engine) & Multimodal Vector Datastore Engine
 # ==============================================================================
 import json
 import threading
@@ -195,16 +195,23 @@ DATASTORE_DIR = TEMP_DIR / "vector_datastore"
 DATASTORE_DIR.mkdir(parents=True, exist_ok=True)
 INDEX_FILE = DATASTORE_DIR / "index.json"
 
+DISCOVERY_ENGINE_DATASTORE_ID = os.environ.get("VERTEX_SEARCH_DATASTORE_ID") or os.environ.get("DISCOVERY_ENGINE_DATASTORE_ID")
+DISCOVERY_ENGINE_LOCATION = os.environ.get("DISCOVERY_ENGINE_LOCATION", "global")
+
 class MultimodalVectorDatastore:
     """
     Manages semantic indexing, retrieval, and similarity search for generated images
-    using Vertex AI Multimodal Embeddings (multimodalembedding@001 / text-embedding-004).
+    using:
+    1. Vertex AI Search (Discovery Engine - google.cloud.discoveryengine_v1)
+    2. Vertex AI Multimodal Embeddings (multimodalembedding@001) dense vector search.
     """
     def __init__(self):
         self.lock = threading.Lock()
         self.index = self._load_index()
         self.emb_model = None
+        self.discovery_client = None
         self._init_embedding_model()
+        self._init_discovery_engine()
 
     def _init_embedding_model(self):
         if PROJECT_ID:
@@ -213,6 +220,15 @@ class MultimodalVectorDatastore:
                 self.emb_model = MultiModalEmbeddingModel.from_pretrained("multimodalembedding@001")
             except Exception as e:
                 print(f"[VectorDatastore] Notice: MultiModalEmbeddingModel init: {e}")
+
+    def _init_discovery_engine(self):
+        if PROJECT_ID and DISCOVERY_ENGINE_DATASTORE_ID:
+            try:
+                from google.cloud import discoveryengine_v1
+                self.discovery_client = discoveryengine_v1.SearchServiceClient()
+                print(f"[VectorDatastore] Vertex AI Search (Discovery Engine) initialized with DataStore: '{DISCOVERY_ENGINE_DATASTORE_ID}'")
+            except Exception as e:
+                print(f"[VectorDatastore] Notice: Discovery Engine init: {e}")
 
     def _load_index(self):
         if INDEX_FILE.exists():
@@ -249,9 +265,41 @@ class MultimodalVectorDatastore:
 
     def search_similar(self, query_text: str, similarity_threshold: float = 0.70) -> Tuple[Optional[dict], float]:
         """
-        Searches datastore for the most similar existing image based on prompt embedding.
+        Searches datastore for the most similar existing image using Vertex AI Search (Discovery Engine)
+        and Multimodal Embeddings (multimodalembedding@001).
         Returns (closest_entry, similarity_score).
         """
+        # 1. Try Vertex AI Search (Discovery Engine) if configured
+        if self.discovery_client and DISCOVERY_ENGINE_DATASTORE_ID:
+            try:
+                from google.cloud import discoveryengine_v1
+                serving_config = (
+                    f"projects/{PROJECT_ID}/locations/{DISCOVERY_ENGINE_LOCATION}/"
+                    f"collections/default_collection/dataStores/{DISCOVERY_ENGINE_DATASTORE_ID}/"
+                    f"servingConfigs/default_search"
+                )
+                request = discoveryengine_v1.SearchRequest(
+                    serving_config=serving_config,
+                    query=query_text,
+                    page_size=1,
+                )
+                response = self.discovery_client.search(request=request)
+                for result in response.results:
+                    doc = result.document
+                    doc_data = dict(doc.struct_data) if hasattr(doc, "struct_data") else {}
+                    if "image_path" in doc_data and os.path.exists(doc_data["image_path"]):
+                        score = 0.95
+                        print(f"[Discovery Engine] Found matching document '{doc.id}' (Score: {score})")
+                        return {
+                            "id": doc.id,
+                            "prompt": doc_data.get("prompt", query_text),
+                            "image_path": doc_data["image_path"],
+                            "engine": "discovery_engine"
+                        }, score
+            except Exception as de_err:
+                print(f"[Discovery Engine Search Error] {de_err}, falling back to Multimodal Vector Index...")
+
+        # 2. Search Multimodal Vector Index (Cosine Similarity over dense embeddings)
         with self.lock:
             if not self.index:
                 return None, 0.0
@@ -279,7 +327,7 @@ class MultimodalVectorDatastore:
 
     def index_image(self, image_pil: Image.Image, prompt: str, entry_id: Optional[str] = None):
         """
-        Indexes a newly synthesized or edited image into the vector datastore for future retrieval.
+        Indexes a newly synthesized or edited image into the vector datastore and Discovery Engine.
         """
         if image_pil is None:
             return
@@ -301,6 +349,28 @@ class MultimodalVectorDatastore:
                     self.index.append(entry)
                     self._save_index()
                     print(f"[VectorDatastore] Indexed asset '{eid}' for prompt: '{prompt[:40]}...'")
+
+                # If Discovery Engine is configured, write document
+                if self.discovery_client and DISCOVERY_ENGINE_DATASTORE_ID:
+                    try:
+                        from google.cloud import discoveryengine_v1
+                        doc_client = discoveryengine_v1.DocumentServiceClient()
+                        parent = (
+                            f"projects/{PROJECT_ID}/locations/{DISCOVERY_ENGINE_LOCATION}/"
+                            f"collections/default_collection/dataStores/{DISCOVERY_ENGINE_DATASTORE_ID}/"
+                            f"branches/default_branch"
+                        )
+                        document = discoveryengine_v1.Document(
+                            id=eid,
+                            struct_data={
+                                "title": prompt[:100],
+                                "prompt": prompt,
+                                "image_path": str(img_path),
+                            }
+                        )
+                        doc_client.create_document(parent=parent, document=document, document_id=eid)
+                    except Exception as e:
+                        pass
             except Exception as e:
                 print(f"[VectorDatastore] Indexing failed: {e}")
 

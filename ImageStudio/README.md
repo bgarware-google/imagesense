@@ -25,11 +25,12 @@ Image Studio is an enterprise-grade suite for AI-powered image generation, backg
 5. **✍️ Typography & Marketing Copy**:
    - Render ad copy, discount badges, and headlines with bundled TrueType fonts, LRU font cache, and full RGB color controls.
 
-6. **🔍 Vertex AI Multimodal Vector Search & Retrieval-Augmented Editing**:
-   - Dense 1408-dimensional vector embeddings generated via `multimodalembedding@001`.
-   - **Semantic Pre-Generation Search**: Automatically searches the existing asset datastore for similar prompts/images ($\ge 70\%$ cosine similarity).
+6. **🔍 Vertex AI Search (Discovery Engine) & Multimodal Vector Retrieval**:
+   - **Vertex AI Search (Discovery Engine)**: Native connector (`google.cloud.discoveryengine_v1.SearchServiceClient`) to search and retrieve image documents from Discovery Engine structured/unstructured Data Stores.
+   - **Multimodal Dense Embeddings**: Generates 1408-dimensional vector embeddings via Vertex AI `multimodalembedding@001`.
+   - **Semantic Pre-Generation Search**: Automatically searches the asset datastore for similar prompts/images ($\ge 70\%$ cosine similarity) before generating.
    - **Closest-Candidate Image Refinement**: If a match exists, edits and refines the existing candidate image directly instead of synthesizing from scratch.
-   - **Automatic Indexing**: All newly generated and edited visual assets are indexed into the vector datastore for instant subsequent retrieval and continuous learning.
+   - **Continuous Auto-Indexing**: All newly generated and edited visual assets are indexed into the datastore and Discovery Engine for instant subsequent retrieval and iterative refinement.
 
 ---
 
