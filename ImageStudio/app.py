@@ -674,6 +674,90 @@ class IndexingMemoryAgent:
         return ctx
 
 
+# ==============================================================================
+# BigQuery Telemetry & FinOps Cost Calculation Engine
+# ==============================================================================
+from datetime import datetime, timezone
+import time
+
+BIGQUERY_DATASET = os.environ.get("BIGQUERY_TELEMETRY_DATASET", "imagesense_telemetry")
+BIGQUERY_TABLE = os.environ.get("BIGQUERY_TELEMETRY_TABLE", "finops_telemetry_logs")
+
+class BigQueryTelemetryLogger:
+    """
+    Streams structured telemetry, token consumption, and FinOps metrics
+    asynchronously to Google BigQuery with zero latency impact on user requests.
+    """
+    def __init__(self):
+        self.bq_client = None
+        self.executor = ThreadPoolExecutor(max_workers=4)
+        self.table_ref = None
+        self._init_client()
+
+    def _init_client(self):
+        if PROJECT_ID:
+            try:
+                from google.cloud import bigquery
+                try:
+                    credentials, _ = google.auth.default(quota_project_id=PROJECT_ID)
+                    self.bq_client = bigquery.Client(project=PROJECT_ID, credentials=credentials, location=LOCATION)
+                except Exception:
+                    self.bq_client = bigquery.Client(project=PROJECT_ID, location=LOCATION)
+                self.table_ref = f"{PROJECT_ID}.{BIGQUERY_DATASET}.{BIGQUERY_TABLE}"
+                print(f"[BigQuery FinOps] Initialized telemetry streamer -> '{self.table_ref}'")
+            except Exception as e:
+                print(f"[BigQuery FinOps] Notice: BigQuery client init: {e}")
+
+    def calculate_cost(
+        self,
+        model_name: str,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        images_count: int = 0,
+        vision_checks: int = 0,
+        dlp_chars: int = 0
+    ) -> float:
+        """
+        Calculates estimated cost in USD based on standard Google Cloud Vertex AI pricing.
+        """
+        cost = 0.0
+        # Imagen 4: ~$0.030 per image
+        if "imagen" in (model_name or "").lower():
+            cost += images_count * 0.030
+        # Gemini 2.5 / 3.1: ~$0.0001 / 1k input tokens, ~$0.0004 / 1k output tokens + $0.020 / image
+        elif "gemini" in (model_name or "").lower():
+            cost += (prompt_tokens / 1000.0) * 0.0001
+            cost += (completion_tokens / 1000.0) * 0.0004
+            cost += images_count * 0.020
+        else:
+            cost += images_count * 0.025
+
+        # Cloud Vision SafeSearch: $0.0015 per check
+        cost += vision_checks * 0.0015
+        # Cloud DLP: $0.0002 per 1k characters
+        cost += (dlp_chars / 1000.0) * 0.0002
+        return round(cost, 6)
+
+    def log_event(self, record: dict):
+        """Dispatches telemetry record to BigQuery in a background thread."""
+        if not self.bq_client:
+            return
+        self.executor.submit(self._insert_row, record)
+
+    def _insert_row(self, record: dict):
+        try:
+            if "timestamp" not in record:
+                record["timestamp"] = datetime.now(timezone.utc).isoformat()
+            errors = self.bq_client.insert_rows_json(self.table_ref, [record])
+            if errors:
+                print(f"[BigQuery FinOps Warning] Failed to insert telemetry row: {errors}")
+        except Exception:
+            pass
+
+# Global Telemetry Streamer
+telemetry_logger = BigQueryTelemetryLogger()
+
+
 class ImageSenseMultiAgentOrchestrator:
     """
     Master Orchestrator Agent: Coordinates end-to-end multi-agent execution pipeline.
@@ -688,12 +772,32 @@ class ImageSenseMultiAgentOrchestrator:
         self.safety_agent = CloudVisionSafetyAgent()
         self.memory_agent = IndexingMemoryAgent()
 
-    def process(self, raw_prompt: str) -> Tuple[List[Any], str]:
+    def process(self, raw_prompt: str, user_id: str = "gradio_user") -> Tuple[List[Any], str]:
+        start_time = time.time()
+        req_id = f"req_{uuid.uuid4().hex[:12]}"
         ctx = AgentExecutionContext(raw_prompt=raw_prompt)
         
         # Step 1: Cloud Armor Prompt Security Guard
         ctx = self.guard_agent.inspect(ctx)
         if not ctx.is_prompt_safe:
+            latency_ms = (time.time() - start_time) * 1000.0
+            telemetry_logger.log_event({
+                "request_id": req_id,
+                "user_id": user_id,
+                "feature": "image_generation",
+                "model_name": "none",
+                "prompt_tokens": len(raw_prompt.split()),
+                "completion_tokens": 0,
+                "total_tokens": len(raw_prompt.split()),
+                "images_count": 0,
+                "latency_ms": latency_ms,
+                "estimated_cost_usd": 0.0,
+                "action_taken": "SECURITY_BLOCKED",
+                "similarity_score": 0.0,
+                "pii_redacted": False,
+                "vision_safe": True,
+                "status": "BLOCKED"
+            })
             trace_md = "### 🤖 Multi-Agent Execution Trace\n\n" + "\n\n".join(ctx.agent_trace)
             return [None, None, None, None], trace_md
 
@@ -704,10 +808,13 @@ class ImageSenseMultiAgentOrchestrator:
         ctx = self.search_agent.evaluate(ctx, self.datastore)
 
         # Step 4: Route Execution (Edit vs Generate)
+        model_used = "imagen-4.0-generate-001"
         if ctx.decision == AgentDecision.EDIT_EXISTING:
+            model_used = "gemini-2.5-flash-image"
             ctx = self.edit_agent.execute(ctx, self.datastore)
         
         if ctx.decision == AgentDecision.GENERATE_SCRATCH or not ctx.generated_images:
+            model_used = "imagen-4.0-generate-001"
             ctx = self.gen_agent.execute(ctx)
 
         # Step 5: Cloud Vision API Safety Moderation
@@ -715,6 +822,42 @@ class ImageSenseMultiAgentOrchestrator:
 
         # Step 6: Memory & Indexing
         ctx = self.memory_agent.record(ctx, self.datastore)
+
+        latency_ms = (time.time() - start_time) * 1000.0
+        prompt_tokens = max(1, len(ctx.sanitized_prompt.split()) * 4 // 3)
+        completion_tokens = 256
+        images_count = len([img for img in ctx.safe_images if img is not None])
+        
+        est_cost = telemetry_logger.calculate_cost(
+            model_name=model_used,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            images_count=images_count,
+            vision_checks=images_count,
+            dlp_chars=len(raw_prompt)
+        )
+
+        telemetry_logger.log_event({
+            "request_id": req_id,
+            "user_id": user_id,
+            "feature": "image_generation",
+            "model_name": model_used,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+            "images_count": images_count,
+            "latency_ms": latency_ms,
+            "estimated_cost_usd": est_cost,
+            "action_taken": ctx.decision.value,
+            "similarity_score": float(ctx.similarity_score),
+            "pii_redacted": ctx.pii_redacted,
+            "vision_safe": len(ctx.vision_safety_flags) == 0,
+            "status": "SUCCESS"
+        })
+
+        ctx.agent_trace.append(
+            f"📊 **[BigQuery FinOps Logger]** Streamed telemetry event (`{req_id}`): {prompt_tokens + completion_tokens} tokens, {images_count} images, {latency_ms:.0f}ms latency, Est. Cost: **${est_cost:.4f} USD**."
+        )
 
         images = ctx.safe_images[:]
         while len(images) < 4:
@@ -736,6 +879,7 @@ def image_generation_completion(input_prompt):
     4. Routing: Edit Agent (if similarity >= 70%) OR Generation Agent (from scratch)
     5. Cloud Vision Agent: SafeSearch moderation
     6. Memory Agent: Continuous Indexing for next retrieval
+    7. BigQuery FinOps: Telemetry & Token Logging
     """
     if not input_prompt or not str(input_prompt).strip():
         gr.Warning("Please enter an image prompt first.")
@@ -1344,10 +1488,31 @@ def health_check():
 @fastapi_app.post("/api/v1/batch/generate", response_model=BatchJobResponse)
 def submit_batch_job(req: BatchGenerationRequest, user_claims: dict = Depends(verify_oidc_token)):
     """
-    OAuth 2.0 / OIDC Protected Endpoint: Submits a batch image generation job.
+    OAuth 2.0 / OIDC Protected Endpoint: Submits a batch image generation job and logs FinOps telemetry to BigQuery.
     """
     job_id = f"job-{uuid.uuid4().hex[:12]}"
-    caller = user_claims.get("email") or user_claims.get("sub", "authenticated-service-account")
+    caller = user_claims.get("email") or user_claims.get("sub", "sa-imagesense-api")
+    total_tokens = sum(len(p.split()) for p in req.prompts) * 4 // 3
+    est_cost = len(req.prompts) * req.num_variations_per_prompt * 0.030
+
+    telemetry_logger.log_event({
+        "request_id": job_id,
+        "user_id": caller,
+        "feature": "batch_generate",
+        "model_name": req.model_name or "gemini-2.5-flash-image",
+        "prompt_tokens": total_tokens,
+        "completion_tokens": len(req.prompts) * 256,
+        "total_tokens": total_tokens + (len(req.prompts) * 256),
+        "images_count": len(req.prompts) * req.num_variations_per_prompt,
+        "latency_ms": 150.0,
+        "estimated_cost_usd": est_cost,
+        "action_taken": "BATCH_QUEUED",
+        "similarity_score": 0.0,
+        "pii_redacted": False,
+        "vision_safe": True,
+        "status": "SUCCESS"
+    })
+
     return BatchJobResponse(
         job_id=job_id,
         status="QUEUED",

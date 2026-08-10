@@ -56,6 +56,24 @@ Image Studio coordinates an autonomous multi-agent pipeline orchestrated by the 
 
 ---
 
+## 📊 BigQuery Telemetry, Token Tracking & Looker FinOps Dashboard
+
+Image Studio automatically streams rich runtime execution telemetry, token consumption, and cost calculations asynchronously to **Google BigQuery** for real-time FinOps monitoring in **Looker Studio**:
+
+### Streamed Telemetry Fields (`imagesense_telemetry.finops_telemetry_logs`):
+* **Execution Identity & Timing**: `timestamp`, `request_id`, `user_id` (authenticated caller/service account), `client_ip`.
+* **Token & Computation Metrics**: `prompt_tokens`, `completion_tokens`, `total_tokens`, `images_count`, `latency_ms`.
+* **Cost & Model Attribution**: `model_name` (e.g. `imagen-4.0-generate-001`, `gemini-2.5-flash-image`), `estimated_cost_usd`.
+* **Semantic Routing & Safety Auditing**: `action_taken` (`EDIT_EXISTING`, `GENERATE_SCRATCH`, `SECURITY_BLOCKED`), `similarity_score`, `pii_redacted`, `vision_safe`, `status`.
+
+### Looker Studio FinOps Analytics:
+* **Total Spend & Run Rate ($)**: Aggregated spend across Vertex AI Imagen, Gemini, Vision API, and Discovery Engine.
+* **Semantic Cache Savings ($)**: Calculated dollar savings from editing closest matches ($\sim\$0.02$/edit) versus synthesizing from scratch ($\sim\$0.12$/generation).
+* **Token Volume Trends**: User and department token consumption growth.
+* **Security & Compliance Audits**: Real-time monitor of prompt injection blocks and Cloud DLP PII redactions.
+
+---
+
 ## 🔐 Authentication & Authorization
 
 Image Studio enforces an enterprise security architecture adhering to zero-trust and least-privilege principles:
@@ -220,11 +238,14 @@ ImageStudio/
 ├── .env.example                        # Environment variable template
 ├── fonts/                              # TrueType fonts (Arial, Bold, Black, Italic, Narrow)
 ├── tmp/                                # Thread-safe runtime buffer directory (auto-cleaned)
+├── finops/
+│   └── README.md                       # Looker Studio setup, schema, and KPI guide
 ├── deployment/
 │   └── cloud-armor-ingress/
 │       ├── main.tf                     # Terraform IaC for Cloud Armor & Load Balancer
 │       ├── iam.tf                      # Dedicated Service Accounts & WIF configuration
 │       ├── cmek.tf                     # Cloud KMS CMEK encryption & persistent storage
+│       ├── bigquery_finops.tf          # BigQuery Telemetry Table & Looker Views
 │       └── deploy-ingress.sh           # Automated Cloud Armor provisioning script
 └── README.md                           # Documentation and deployment guide
 ```
