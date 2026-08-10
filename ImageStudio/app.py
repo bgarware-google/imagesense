@@ -412,7 +412,7 @@ def edit_existing_image(reference_pil: Image.Image, new_prompt: str):
     Refines and edits an existing closest-matching image from the vector datastore
     using Gemini Multimodal image editing (gemini-2.5-flash-image).
     """
-    for model_name in ["gemini-2.5-flash-image", "gemini-3.1-flash-image", "gemini-3-pro-image-preview"]:
+    for model_name in ["gemini-2.5-flash-image"]:
         try:
             from vertexai.generative_models import GenerativeModel, Part
             model = GenerativeModel(model_name)

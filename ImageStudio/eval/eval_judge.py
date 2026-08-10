@@ -51,10 +51,11 @@ You are an expert AI quality evaluation judge for commercial product imagery.
 Analyze this generated image against the original user prompt:
 Prompt: "{prompt}"
 Expected Visual Elements: {json.dumps(expected_elements or [])}
+Note: Sensitive personal data (names, emails, phones) is intentionally sanitized with safety tokens (e.g. [PERSON_NAME], [EMAIL_ADDRESS]); evaluate visual attributes and product features.
 
 Score the generation on a 1.0 to 5.0 scale for each of the following rubrics:
-1. "faithfulness": Does the image accurately include all required elements without hallucinating conflicting details?
-2. "relevance": Is the visual aesthetic and lighting closely aligned with the user intent?
+1. "faithfulness": Does the image accurately include the requested visual/product elements without hallucinating conflicting details?
+2. "relevance": Is the visual aesthetic, lighting, and composition aligned with the user intent?
 3. "coherence": Is the compositional quality, spatial alignment, and photorealism high?
 
 Respond ONLY with valid JSON in this exact schema:
