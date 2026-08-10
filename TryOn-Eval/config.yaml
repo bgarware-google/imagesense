@@ -1,0 +1,19 @@
+project:
+  id: "gdc-ai-playground"
+  location: "us-central1"
+  zone: "us-central1-a"
+
+gemini:
+  model_name: "gemini-2.5-flash"
+
+vto:
+  model_name: "virtual-try-on-001"
+  seed: None
+  base_steps: 32
+  number_of_images: 1
+  output_mime_type: "image/png"
+  safety_filter_level: "BLOCK_LOW_AND_ABOVE"
+  person_generation: "ALLOW_ALL"
+
+nano_banana:
+  model_name: "gemini-2.5-flash-image"

@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Agentic VTO: AutoEval & Self-Heal</title>
+  <meta name="description" content="Stunning AI-Powered Virtual Try-On & Multimodal Evaluation Studio built on Google Cloud Vertex AI (virtual-try-on-001, Nano Banana Gemini 2.5 Flash Image, and MediaPipe Pose Landmarker Heavy).">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="/static/index.css">
+</head>
+<body>
+  <!-- Header Bar -->
+  <header class="studio-header" id="studioHeader">
+    <div class="brand-area">
+      <div class="brand-icon" title="Powered by Google Gemini">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 0C12 6.627 6.627 12 0 12C6.627 12 12 17.373 12 24C12 17.373 17.373 12 24 12C17.373 12 12 6.627 12 0Z" fill="url(#geminiGrad)"/>
+          <defs>
+            <linearGradient id="geminiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#4285F4"/>
+              <stop offset="50%" stop-color="#9B72CB"/>
+              <stop offset="100%" stop-color="#D96570"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <div>
+        <h1 class="brand-title">Agentic VTO: AutoEval & Self-Heal</h1>
+        <div class="brand-subtitle">Autonomous Agentic Try-On & Evaluation Studio</div>
+      </div>
+    </div>
+    <div class="model-badges">
+      <span class="badge" id="badgeVto">
+        <span>👗</span> virtual-try-on-001
+      </span>
+      <span class="badge banana" id="badgeNano">
+        <span>🍌</span> Nano Banana (gemini-2.5-flash-image)
+      </span>
+      <span class="badge eval" id="badgePose">
+        <span>🎯</span> Pose Target > 0.90
+      </span>
+    </div>
+  </header>
+
+  <!-- Main Studio Workspace -->
+  <main class="studio-main" id="mainWorkspace">
+    <!-- Left Column: Studio Controls & Inputs -->
+    <aside class="studio-card" id="inputStudioCard">
+      <div class="card-header">
+        <h2>🛠️ Input Studio</h2>
+        <div class="streaming-indicator" id="streamingIndicator">
+          <span>⚡ Live Agent Processing Active...</span>
+        </div>
+      </div>
+
+      <div class="upload-group">
+        <!-- Person Image Upload Zone -->
+        <div>
+          <label class="slider-label" style="display:block;margin-bottom:8px;">1. Person Reference Image</label>
+          <div class="dropzone" id="personDropzone">
+            <input type="file" id="personFileInput" accept="image/*" style="display:none;">
+            <div class="dropzone-placeholder">
+              <p>Drag & drop Person photo</p>
+              <span>or click to browse local files</span>
+            </div>
+            <img class="dropzone-preview" id="personPreview" alt="Person image preview">
+          </div>
+
+          <div class="samples-bar" id="personSamplesContainer">
+            <div class="samples-title">Quick Sample Person</div>
+            <div class="sample-chips" id="personSampleChips"></div>
+          </div>
+        </div>
+
+        <!-- Garment Image Upload Zone -->
+        <div>
+          <label class="slider-label" style="display:block;margin-bottom:8px;">2. Garment Product Image</label>
+          <div class="dropzone" id="garmentDropzone">
+            <input type="file" id="garmentFileInput" accept="image/*" style="display:none;">
+            <div class="dropzone-placeholder">
+              <p>Drag & drop Garment photo</p>
+              <span>or click to browse local files</span>
+            </div>
+            <img class="dropzone-preview" id="garmentPreview" alt="Garment image preview">
+          </div>
+
+          <div class="samples-bar" id="garmentSamplesContainer">
+            <div class="samples-title">Quick Sample Garments</div>
+            <div class="sample-chips" id="garmentSampleChips"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Iteration Config & Trigger -->
+      <div class="config-controls">
+        <div class="control-row">
+          <span class="slider-label">Autonomous Max Iterations</span>
+          <span class="slider-val" id="maxItersDisplay">4</span>
+        </div>
+        <input type="range" id="maxItersSlider" min="1" max="7" value="4" step="1">
+
+        <div class="control-row" style="margin-top: 16px;">
+          <span class="slider-label">Nano Banana Handover Threshold</span>
+          <span class="slider-val" id="nanoThresholdDisplay">0.75</span>
+        </div>
+        <input type="range" id="nanoThresholdSlider" min="0.50" max="0.95" value="0.75" step="0.05">
+
+        <div class="control-row" style="margin-top: 18px; display:flex; align-items:center; justify-content:space-between;">
+          <span class="slider-label" style="font-weight:600;">Online Mode (Live API vs Static Output)</span>
+          <label class="switch" title="Turn OFF to load static precomputed images from Output folder">
+            <input type="checkbox" id="onlineModeToggle" checked>
+            <span class="slider-toggle round"></span>
+          </label>
+        </div>
+
+        <div class="button-row">
+          <button type="button" class="btn-secondary" id="clearBtn">Clear Studio</button>
+          <button type="button" class="btn-primary" id="runAgenticBtn">
+            <span>🚀</span> Start Agentic Try-On Loop
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Right Column: Live Streaming Monitor -->
+    <section class="monitor-area" id="studioMonitor">
+      <div class="studio-card">
+        <div class="card-header">
+          <h2>⚡ Live Agentic Output Monitor</h2>
+          <span class="badge" id="iterationStatusChip">Ready</span>
+        </div>
+
+        <div class="monitor-main-grid">
+          <!-- Main Image Display -->
+          <div>
+            <div class="output-stage" id="mainOutputStage">
+              <div class="output-placeholder" id="outputPlaceholderText">
+                <p>Start the Agentic Try-On Loop to stream output images live after every iteration.</p>
+              </div>
+              <img class="output-image" id="mainOutputImage" alt="Latest Try-On Output">
+
+              <!-- Unmistakable Animated Live Processing Overlay -->
+              <div class="active-processing-overlay" id="activeProcessingOverlay">
+                <div class="orbital-spinner"></div>
+                <div class="processing-headline" id="processingHeadlineText">🤖 Autonomous AI Processing Active...</div>
+                <div class="processing-subtext" id="processingSubtext">Draping garment via Virtual Try-On & Nano Banana anti-mirroring engine</div>
+                <div class="progress-bar-track">
+                  <div class="progress-bar-fill"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+
+          <!-- Pose & Attribute Evaluation Panels -->
+          <div class="metrics-stage">
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-title">Pose Comparison Similarity Score</span>
+                <span class="badge eval" id="poseGoalBadge">Target > 0.90</span>
+              </div>
+              <div class="score-display">
+                <span class="score-num" id="poseScoreValue">—</span>
+                <span class="score-target" id="poseScoreStatus">Waiting for run...</span>
+              </div>
+              <div style="margin-top: 14px;">
+                <img class="output-image" id="poseVisualImage" style="max-height:220px;width:100%;border-radius:8px;object-fit:contain;display:none;" alt="Pose Skeleton Visualization">
+              </div>
+            </div>
+
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-title">Garment Attribute Differences</span>
+                <span class="badge" id="diffCountBadge">0 Diffs Target</span>
+              </div>
+              <pre id="attributeDiffsContainer" style="max-height:160px;overflow-y:auto;font-family:var(--font-mono);font-size:0.8rem;color:var(--text-sub);white-space:pre-wrap;">No attribute differences detected yet.</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Step Tracker Table -->
+        <div style="margin-top: 28px;">
+          <h3 style="font-size:1rem;margin-bottom:12px;color:var(--text-main);">Real-Time Agentic Iteration Log</h3>
+          <div style="overflow-x:auto;">
+            <table class="tracker-table" id="trackerTable">
+              <thead>
+                <tr>
+                  <th>Iter</th>
+                  <th>Model / Engine</th>
+                  <th>Action & Anti-Mirroring Strategy</th>
+                  <th>Pose Score (>0.90)</th>
+                  <th>Attr Diffs (0)</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="trackerBody">
+                <tr>
+                  <td colspan="6" style="text-align:center;color:var(--text-muted);">No iterations executed yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Visual Iteration Gallery -->
+      <div class="studio-card">
+        <div class="card-header">
+          <h2>Step-by-Step Iteration Progression Gallery</h2>
+          <span style="font-size:0.8rem;color:var(--text-muted);">Click any slide to inspect that iteration</span>
+        </div>
+        <div class="gallery-strip" id="iterationGalleryStrip">
+          <div style="color:var(--text-muted);font-size:0.9rem;padding:12px 0;">Iteration gallery slides appear here as each step completes...</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
