@@ -1,0 +1,35 @@
+# OS metadata
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Secrets & Environment variables
+**/.env
+**/*.env
+**/.env.local
+
+# Virtual environments
+**/.venv/
+**/venv/
+**/ENV/
+**/env/
+
+# Python cache & artifacts
+**/__pycache__/
+**/*.py[cod]
+*$py.class
+*.so
+
+# Temporary directories
+**/tmp/
+**/*.tmp
+**/*.log
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.ipynb_checkpoints/
