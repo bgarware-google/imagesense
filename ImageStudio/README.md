@@ -148,6 +148,34 @@ Image Studio includes a dedicated automated chaos and failure injection testing 
 
 ---
 
+## ⚡ Performance & Cost Optimization Architecture
+
+Image Studio is engineered to deliver maximum throughput, sub-second latency, and optimized cloud economics:
+
+### 1. 🚀 Scalability & Elasticity
+* **Horizontal & Vertical Autoscaling**: Cloud Run services automatically scale horizontally between 1 and 20 instances based on concurrency thresholds (`max_instance_request_concurrency = 40`), provisioned with 4 vCPUs and 8 GiB RAM per instance with dedicated CPU allocation (`cpu_idle = false`) for deterministic latency.
+* **Global Load Balancing & Serverless NEGs**: Fronted by a Google Cloud External HTTPS Application Load Balancer with Serverless Network Endpoint Groups (NEGs) and Cloud Armor DDoS mitigation.
+* **High-Throughput API Concurrency**: Image generation executes 4 parallel threads per prompt. Asynchronous batch workloads are decoupled through Cloud Pub/Sub queues (`imagesense-batch-jobs`) for non-blocking execution.
+* **HPC & GPU Cluster Scaling**: Integrated GKE Autopilot node pools with **NVIDIA L4 GPUs (`g2-standard-4`)** for GPU-accelerated segmentation (`rembg` / ONNX TensorRT) during large-scale catalog processing.
+
+### 2. 💡 Resource Efficiency & Spot/Preemptible Compute
+* **Workload-Specific Right-Sizing**: Web ingress and API routing run on lightweight CPU-optimized serverless containers, while heavy batch rendering is offloaded to GPU worker nodes.
+* **Spot / Preemptible GPU Pools**: Batch rendering node pools utilize GKE Spot instances (`spot = true`), reducing underlying compute infrastructure expenses by **60% to 80%** compared to standard on-demand pricing.
+
+### 3. 💰 AI Cost Management & Token Optimization
+* **Tiered Model Selection Trade-offs**:
+  * **Image Refinement & Editing**: Routed to Gemini 2.5 Flash Image ($\sim\$0.02$/image) for cost-effective multimodal delta edits.
+  * **Novel Synthesis**: Routed to Imagen 4 (`imagen-4.0-generate-001`) ($\sim\$0.03$/image) when zero matching assets exist.
+* **Semantic Caching & Vector Reuse (83% Cost Reduction)**:
+  * By searching the datastore before generating, matching assets ($\ge 70\%$ similarity) are edited directly instead of synthesizing 4 images from scratch.
+  * **Cost Impact**: Reduces per-request generation cost from **$\sim\$0.12$** down to **$\sim\$0.02$** (**83% savings**).
+* **Token Optimization & Context Management**:
+  * Structured prompt enrichment enriches only essential visual descriptors (Subject, Action, Environment, Lighting, Quality), eliminating prompt bloat.
+  * Cloud DLP tokenization maintains minimal token footprint.
+  * In-memory LRU font caching and local vector index memory reduce redundant remote roundtrips.
+
+---
+
 ## 🔐 Authentication & Authorization
 
 Image Studio enforces an enterprise security architecture adhering to zero-trust and least-privilege principles:
@@ -323,6 +351,7 @@ ImageStudio/
 │   │   ├── disaster_recovery.tf        # GCS Dual-Bucket replication (RTO<15m, RPO<5m)
 │   │   ├── audit_logging.tf            # Cloud Audit Logging for SOC 2 / ISO 27001
 │   │   ├── bigquery_finops.tf          # BigQuery Telemetry Table & Looker Views
+│   │   ├── gke_spot.tf                 # GKE Spot GPU cluster for batch rendering
 │   │   └── deploy-ingress.sh           # Automated Cloud Armor provisioning script
 │   ├── cloudbuild-security-scan.yaml   # CI/CD Policy-as-Code (checkov, tfsec, tflint)
 │   └── terraform/                      # 7 Decoupled Modules & Dev/Prod Environments
