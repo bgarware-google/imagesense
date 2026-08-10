@@ -1,0 +1,16 @@
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+tmp/
+*.tmp
+*.log
+.env
+.env.*
+.git/
+.gitignore
+.DS_Store
+.ipynb_checkpoints/
