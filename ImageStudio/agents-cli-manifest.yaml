@@ -1,0 +1,9 @@
+name: "image-studio"
+acli_version: "1.1.0"
+agent_directory: "."
+region: "us-central1"
+language: "python"
+create_params:
+  deployment_target: "cloud_run"
+  session_type: "in_memory"
+  cicd_runner: "skip"
