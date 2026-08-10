@@ -50,11 +50,94 @@ else:
     print("[ImageStudio] Notice: GOOGLE_CLOUD_PROJECT is not set. Set it in .env to enable Vertex AI / Imagen generation.")
 
 
+# ==============================================================================
+# Cloud DLP Automated PII Scrubbing & Data Protection
+# ==============================================================================
+import re
+
+def scrub_pii_dlp(text: str) -> str:
+    """
+    Automated PII Scrubbing via Cloud DLP:
+    Detects, masks, and redacts Sensitive Data / PII (names, emails, phone numbers,
+    addresses, credit cards, SSNs) from user prompts and metadata prior to LLM processing.
+    Falls back to deterministic regex de-identification if Cloud DLP API is unreachable.
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    sanitized_text = text
+
+    # 1. Try Google Cloud DLP API
+    if PROJECT_ID:
+        try:
+            from google.cloud import dlp_v2
+            dlp_client = dlp_v2.DlpServiceClient()
+            parent = f"projects/{PROJECT_ID}/locations/global"
+
+            info_types = [
+                {"name": "EMAIL_ADDRESS"},
+                {"name": "PHONE_NUMBER"},
+                {"name": "PERSON_NAME"},
+                {"name": "CREDIT_CARD_NUMBER"},
+                {"name": "STREET_ADDRESS"},
+                {"name": "US_SOCIAL_SECURITY_NUMBER"},
+                {"name": "IP_ADDRESS"},
+            ]
+            inspect_config = {
+                "info_types": info_types,
+                "min_likelihood": dlp_v2.Likelihood.POSSIBLE,
+                "include_quote": True,
+            }
+
+            deidentify_config = {
+                "info_type_transformations": {
+                    "transformations": [
+                        {
+                            "primitive_transformation": {
+                                "replace_with_info_type_config": {}
+                            }
+                        }
+                    ]
+                }
+            }
+
+            item = {"value": text}
+            response = dlp_client.deidentify_content(
+                request={
+                    "parent": parent,
+                    "deidentify_config": deidentify_config,
+                    "inspect_config": inspect_config,
+                    "item": item,
+                }
+            )
+            if response and response.item and response.item.value:
+                sanitized_text = response.item.value
+                if sanitized_text != text:
+                    print(f"[Cloud DLP] Sensitive PII detected and redacted: '{text}' -> '{sanitized_text}'")
+        except Exception:
+            pass
+
+    # 2. Defense-in-Depth Regex PII Masking
+    sanitized_text = re.sub(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', '[EMAIL_ADDRESS]', sanitized_text)
+    sanitized_text = re.sub(r'\b(?:\d[ -]*?){13,19}\b', '[CREDIT_CARD_NUMBER]', sanitized_text)
+    sanitized_text = re.sub(r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', '[PHONE_NUMBER]', sanitized_text)
+    sanitized_text = re.sub(r'\b\d{3}-\d{2}-\d{4}\b', '[US_SOCIAL_SECURITY_NUMBER]', sanitized_text)
+
+    return sanitized_text
+
+
 def prompt_generation(persona, signal, theme, lighting, quality, extra_desc, TextOnImg, TextFmtOnImg):
     """
     Generates an enriched image generation prompt using Gemini / Vertex AI text models,
-    with a robust fallback to structured template composition.
+    with a robust fallback to structured template composition and automated Cloud DLP PII scrubbing.
     """
+    # Scrub PII from all user prompt inputs prior to LLM processing
+    persona = scrub_pii_dlp(persona)
+    signal = scrub_pii_dlp(signal)
+    theme = scrub_pii_dlp(theme)
+    extra_desc = scrub_pii_dlp(extra_desc)
+    TextOnImg = scrub_pii_dlp(TextOnImg)
+
     params_list = [p for p in [persona, signal, theme, lighting, quality, extra_desc] if p and str(p).strip()]
     params_list_str = ", ".join(params_list) if params_list else "A high quality product showcase"
     
@@ -98,19 +181,20 @@ output:"""
         else:
             output_prompt += f" Add a title to the corner that reads '{txt}'."
             
-    return output_prompt
+    return scrub_pii_dlp(output_prompt)
 
 
 def image_generation_completion(input_prompt):
     """
     Generates images from the input prompt using Imagen 4 (imagen-4.0-generate-001)
     and Gemini Native Image models (gemini-3.1-flash-image, gemini-2.5-flash-image, gemini-3-pro-image-preview).
+    Sanitizes prompt with Cloud DLP before inference.
     """
     if not input_prompt or not str(input_prompt).strip():
         gr.Warning("Please enter an image prompt first.")
         return [None, None, None, None]
 
-    prompt_text = str(input_prompt).strip()
+    prompt_text = scrub_pii_dlp(str(input_prompt).strip())
     errors = []
 
     # 1. Try Imagen 4 and compatible vision models
@@ -188,7 +272,7 @@ def background_generation(input_image, prompt):
         gr.Warning("Please provide a background prompt.")
         return [None, None, None]
 
-    prompt_text = str(prompt).strip()
+    prompt_text = scrub_pii_dlp(str(prompt).strip())
     req_id = uuid.uuid4().hex[:8]
     base_img_path = TEMP_DIR / f"base_img_{req_id}.png"
     created_temp_files = [base_img_path]

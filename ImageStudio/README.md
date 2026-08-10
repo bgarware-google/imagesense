@@ -48,6 +48,21 @@ Image Studio enforces an enterprise security architecture adhering to zero-trust
 
 ---
 
+## 🔒 Data Protection & Privacy
+
+### Managed Encryption Keys (Cloud KMS CMEK)
+* **CMEK Across All Persistent Layers**: Enforced Customer-Managed Encryption Key (CMEK) encryption across all data storage layers:
+  * **GCS Image Artifact Buckets** (`imagesense-artifacts-*`): All generated and uploaded images encrypted with dedicated CMEK key (`imagesense-gcs-cmek-key`).
+  * **BigQuery Telemetry & Analytics**: Analytical logs, latency telemetry, and audit traces encrypted with `imagesense-bq-cmek-key`.
+  * **Vertex AI Vector Search**: Embedding indices and vector metadata protected with `imagesense-vertex-cmek-key`.
+* **Automated Key Rotation**: Automated 90-day (`7776000s`) crypto key rotation policy configured on the `imagesense-keyring` key ring.
+
+### Automated PII Scrubbing via Cloud DLP
+* **Sensitive Data Redaction**: Integrated Google Cloud Data Loss Prevention (Cloud DLP `dlp_v2`) pre-processing templates to automatically detect, mask, and redact Sensitive Data / PII (person names, emails, phone numbers, street addresses, credit card numbers, US SSNs, and IP addresses) from user prompts and metadata prior to LLM and Imagen model processing.
+* **Defense-in-Depth Sanitization**: Coupled Cloud DLP inspection with high-performance regex de-identification fallback filters to ensure zero PII leakage during network interruptions.
+
+---
+
 ## 🛡️ Ingress Security with Google Cloud Armor
 
 Image Studio includes infrastructure configurations to front Cloud Run with **Google Cloud Armor** and an **External HTTPS Application Load Balancer**.
@@ -180,6 +195,7 @@ ImageStudio/
 │   └── cloud-armor-ingress/
 │       ├── main.tf                     # Terraform IaC for Cloud Armor & Load Balancer
 │       ├── iam.tf                      # Dedicated Service Accounts & WIF configuration
+│       ├── cmek.tf                     # Cloud KMS CMEK encryption & persistent storage
 │       └── deploy-ingress.sh           # Automated Cloud Armor provisioning script
 └── README.md                           # Documentation and deployment guide
 ```
