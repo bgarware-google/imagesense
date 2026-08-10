@@ -6,26 +6,28 @@ ImageSense is an enterprise multimodal image generation, background synthesis, a
 
 ## 📂 Repository Contents
 
-* **`ImageStudio/`**: Complete web application, Jupyter notebook, Dockerfile, TrueType fonts, and source code.
+* **`ImageStudio/`**: Complete web application, Jupyter notebook, Dockerfile, TrueType fonts, Cloud Armor Terraform configs, and source code.
 * **`PRD.pdf`**: Product Requirements Document and architectural specifications.
 
 ---
 
-## ☁️ Google Cloud Run Deployment
+## ☁️ Google Cloud Run & Ingress Security
 
-Deploy `ImageStudio` directly from source with a single command:
-
+### 1. Deploy Cloud Run Service
 ```bash
 cd ImageStudio
+agents-cli deploy --project YOUR_PROJECT_ID --region us-central1 --no-confirm-project
+```
 
-gcloud run deploy image-studio \
-  --source . \
-  --region us-central1 \
-  --project YOUR_PROJECT_ID \
-  --allow-unauthenticated \
-  --memory 4Gi \
-  --cpu 2 \
-  --set-env-vars GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,GOOGLE_CLOUD_LOCATION=us-central1
+### 2. Provision Cloud Armor Ingress Protection
+```bash
+cd ImageStudio/deployment/cloud-armor-ingress
+./deploy-ingress.sh YOUR_PROJECT_ID us-central1
 ```
 
 For full setup and local development instructions, see [ImageStudio/README.md](ImageStudio/README.md).
+
+---
+
+## 👤 Author
+* **Bhushan Garware**

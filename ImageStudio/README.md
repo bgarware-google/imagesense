@@ -27,6 +27,34 @@ Image Studio is an enterprise-grade suite for AI-powered image generation, backg
 
 ---
 
+## 🛡️ Ingress Security with Google Cloud Armor
+
+Image Studio includes infrastructure configurations to front Cloud Run with **Google Cloud Armor** and an **External HTTPS Application Load Balancer**.
+
+### Protections Enabled
+* **Adaptive Layer 7 DDoS Defense**: Machine-learning backed traffic anomaly mitigation.
+* **WAF OWASP Top 10 Core Rules**: Blocks Cross-Site Scripting (XSS), SQL Injection (SQLi), and protocol exploits.
+* **Rate Limiting**: Enforces max 120 requests/minute per client IP to prevent quota abuse and brute force.
+* **Scanner & Bot Detection**: Blocks automated vulnerability scanners.
+* **Ingress Lockdown**: Cloud Run is configured with `--ingress=internal-and-cloud-load-balancing` so direct `.run.app` URLs are unreachable, forcing all ingress through Cloud Armor.
+
+### Deploying Cloud Armor Ingress
+
+#### Option 1: Automated Script
+```bash
+cd deployment/cloud-armor-ingress
+./deploy-ingress.sh <YOUR_PROJECT_ID> <YOUR_REGION>
+```
+
+#### Option 2: Terraform (IaC)
+```bash
+cd deployment/cloud-armor-ingress
+terraform init
+terraform apply -var="project_id=YOUR_PROJECT_ID" -var="region=us-central1"
+```
+
+---
+
 ## ☁️ Deploying to Google Cloud Run
 
 Image Studio is pre-configured with a production-ready `Dockerfile` and optimized for Google Cloud Run serverless container hosting.
@@ -34,16 +62,21 @@ Image Studio is pre-configured with a production-ready `Dockerfile` and optimize
 ### 1. Prerequisites
 - Google Cloud Platform account with **Cloud Run**, **Cloud Build**, and **Vertex AI** APIs enabled:
   ```bash
-  gcloud services enable run.googleapis.com cloudbuild.googleapis.com aiplatform.googleapis.com
+  gcloud services enable run.googleapis.com cloudbuild.googleapis.com aiplatform.googleapis.com compute.googleapis.com
   ```
 - Authenticate with GCP:
   ```bash
   gcloud auth application-default login
   ```
 
-### 2. Deploy from Source
-Run the following command from the `ImageStudio/` directory:
+### 2. Deploy from Source (Agent CLI or gcloud)
 
+#### Using Agent CLI:
+```bash
+agents-cli deploy --project YOUR_PROJECT_ID --region us-central1 --no-confirm-project
+```
+
+#### Using gcloud CLI:
 ```bash
 gcloud run deploy image-studio \
   --source . \
@@ -113,19 +146,23 @@ Run all cells to launch the interactive Gradio interface directly inside Jupyter
 
 ```
 ImageStudio/
-├── app.py                  # Standalone production Gradio web application
-├── ImageStudio.ipynb       # Interactive Jupyter Notebook version
-├── Dockerfile              # Production container definition for Cloud Run
-├── .dockerignore           # Container build exclusion rules
-├── requirements.txt        # Python package dependencies
-├── .env.example            # Environment variable template
-├── fonts/                  # TrueType fonts (Arial, Bold, Black, Italic, Narrow)
-├── tmp/                    # Thread-safe runtime buffer directory (auto-cleaned)
-└── README.md               # Documentation and deployment guide
+├── app.py                              # Standalone production Gradio web application
+├── ImageStudio.ipynb                   # Interactive Jupyter Notebook version
+├── Dockerfile                          # Production container definition for Cloud Run
+├── .dockerignore                       # Container build exclusion rules
+├── agents-cli-manifest.yaml            # Google Agents CLI manifest
+├── requirements.txt                    # Python package dependencies
+├── .env.example                        # Environment variable template
+├── fonts/                              # TrueType fonts (Arial, Bold, Black, Italic, Narrow)
+├── tmp/                                # Thread-safe runtime buffer directory (auto-cleaned)
+├── deployment/
+│   └── cloud-armor-ingress/
+│       ├── main.tf                     # Terraform IaC for Cloud Armor & Load Balancer
+│       └── deploy-ingress.sh           # Automated Cloud Armor provisioning script
+└── README.md                           # Documentation and deployment guide
 ```
 
 ---
 
 ## 👤 Author
 * **Bhushan Garware**
-
