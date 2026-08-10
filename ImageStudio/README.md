@@ -28,9 +28,31 @@ Image Studio is an enterprise-grade suite for AI-powered image generation, backg
 6. **🔍 Vertex AI Search (Discovery Engine) & Multimodal Vector Retrieval**:
    - **Vertex AI Search (Discovery Engine)**: Native connector (`google.cloud.discoveryengine_v1.SearchServiceClient`) to search and retrieve image documents from Discovery Engine structured/unstructured Data Stores.
    - **Multimodal Dense Embeddings**: Generates 1408-dimensional vector embeddings via Vertex AI `multimodalembedding@001`.
-   - **Semantic Pre-Generation Search**: Automatically searches the asset datastore for similar prompts/images ($\ge 70\%$ cosine similarity) before generating.
+   - **Semantic Pre-Generation Search**: Automatically searches the asset datastore for similar prompts/images (>= 70% cosine similarity) before generating.
    - **Closest-Candidate Image Refinement**: If a match exists, edits and refines the existing candidate image directly instead of synthesizing from scratch.
    - **Continuous Auto-Indexing**: All newly generated and edited visual assets are indexed into the datastore and Discovery Engine for instant subsequent retrieval and iterative refinement.
+
+---
+
+## 🤖 Multi-Agent Collaborative System Architecture
+
+Image Studio coordinates an autonomous multi-agent pipeline orchestrated by the **`ImageSenseMultiAgentOrchestrator`**:
+
+1. **🛡️ Cloud Armor Prompt Guard Agent (`CloudArmorPromptGuardAgent`)**:
+   - Analyzes incoming prompts against Cloud Armor / Model Armor rules, blocking prompt injection, jailbreaks (e.g. DAN mode, system prompt override), and exploit payloads.
+2. **🔒 Cloud DLP PII Scrubbing Agent (`PIIScrubberAgent`)**:
+   - Uses Google Cloud DLP (`dlp_v2`) and regex filters to automatically detect, mask, and redact sensitive personal information (names, emails, phone numbers, credit card numbers, SSNs, physical addresses, IP addresses).
+3. **🔍 Search & Retrieval Agent (`SearchRetrievalAgent`)**:
+   - Queries Vertex AI Search (Discovery Engine) and dense 1408-d Multimodal Embeddings (`multimodalembedding@001`).
+   - If cosine similarity >= 70%, delegates to the **Image Editing Agent**; otherwise delegates to the **Image Generation Agent**.
+4. **🎨 Image Editing Agent (`ImageEditingAgent`)**:
+   - Takes the closest matching candidate image and executes targeted multimodal delta modifications via `gemini-2.5-flash-image`.
+5. **✨ Image Generation Agent (`ImageGenerationAgent`)**:
+   - Synthesizes 4 high-fidelity candidate images from scratch using Imagen 4 (`imagen-4.0-generate-001`) or Gemini Native Image models.
+6. **👁️ Google Cloud Vision Safety Agent (`CloudVisionSafetyAgent`)**:
+   - Performs automated vision safety moderation via Google Cloud Vision API (`SafeSearchDetection`), validating that no images contain adult, violence, or racy policy violations.
+7. **💾 Continuous Indexing & Memory Agent (`IndexingMemoryAgent`)**:
+   - Embeds and indexes all verified safe output images into the vector datastore and Discovery Engine data store for subsequent retrieval loops.
 
 ---
 

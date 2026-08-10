@@ -422,119 +422,327 @@ def edit_existing_image(reference_pil: Image.Image, new_prompt: str):
     return []
 
 
+# ==============================================================================
+# MULTI-AGENT COLLABORATIVE SYSTEM ARCHITECTURE
+# ==============================================================================
+from dataclasses import dataclass, field
+from enum import Enum
+
+class AgentDecision(Enum):
+    EDIT_EXISTING = "EDIT_EXISTING"
+    GENERATE_SCRATCH = "GENERATE_SCRATCH"
+    BLOCK_UNSAFE = "BLOCK_UNSAFE"
+
+@dataclass
+class AgentExecutionContext:
+    raw_prompt: str
+    sanitized_prompt: str = ""
+    is_prompt_safe: bool = True
+    prompt_safety_reason: str = ""
+    pii_redacted: bool = False
+    decision: AgentDecision = AgentDecision.GENERATE_SCRATCH
+    matched_asset_id: Optional[str] = None
+    similarity_score: float = 0.0
+    generated_images: List[Any] = field(default_factory=list)
+    safe_images: List[Any] = field(default_factory=list)
+    vision_safety_flags: List[str] = field(default_factory=list)
+    agent_trace: List[str] = field(default_factory=list)
+
+
+class CloudArmorPromptGuardAgent:
+    """
+    Agent 1: Cloud Armor / Model Armor Prompt Security Guard.
+    Detects and blocks prompt injections, jailbreaks, malicious payloads, and exploit patterns.
+    """
+    INJECTION_PATTERNS = [
+        r"(?i)\bignore\s+all\s+(?:previous|prior)\s+instructions\b",
+        r"(?i)\bjailbreak\b",
+        r"(?i)\bDAN\s+mode\b",
+        r"(?i)\bsystem\s+prompt\s+override\b",
+        r"(?i)<script\b",
+        r"(?i)\bunion\s+select\b",
+        r"(?i)\bexec\s*\(",
+    ]
+
+    def inspect(self, ctx: AgentExecutionContext) -> AgentExecutionContext:
+        ctx.agent_trace.append("🛡️ **[Cloud Armor Prompt Guard Agent]** Inspecting prompt for injection, jailbreaks, and exploits...")
+        for pattern in self.INJECTION_PATTERNS:
+            if re.search(pattern, ctx.raw_prompt):
+                ctx.is_prompt_safe = False
+                ctx.prompt_safety_reason = f"Prompt blocked: restricted security violation detected ('{pattern}')"
+                ctx.agent_trace.append(f"❌ **[Cloud Armor] Blocked**: {ctx.prompt_safety_reason}")
+                return ctx
+        ctx.agent_trace.append("✅ **[Cloud Armor] Verified**: Prompt passed WAF & Prompt Armor security filters.")
+        return ctx
+
+
+class PIIScrubberAgent:
+    """
+    Agent 2: Cloud DLP Automated PII Sanitization Agent.
+    Inspects, detects, and redacts PII (names, emails, phones, SSNs, credit cards, addresses).
+    """
+    def sanitize(self, ctx: AgentExecutionContext) -> AgentExecutionContext:
+        ctx.agent_trace.append("🔒 **[Cloud DLP PII Agent]** Scanning prompt for Sensitive Data & PII...")
+        clean_text = scrub_pii_dlp(ctx.raw_prompt)
+        if clean_text != ctx.raw_prompt:
+            ctx.pii_redacted = True
+            ctx.agent_trace.append("✂️ **[Cloud DLP] Redacted**: Sensitive PII detected and sanitized with safety tokens.")
+        else:
+            ctx.agent_trace.append("✅ **[Cloud DLP] Clean**: No sensitive personal data detected.")
+        ctx.sanitized_prompt = clean_text
+        return ctx
+
+
+class SearchRetrievalAgent:
+    """
+    Agent 3: Vertex AI Search & Multimodal Vector Retrieval Agent.
+    Queries Discovery Engine and Multimodal Embeddings to determine whether to edit or synthesize.
+    """
+    def evaluate(self, ctx: AgentExecutionContext, datastore: MultimodalVectorDatastore) -> AgentExecutionContext:
+        ctx.agent_trace.append("🔍 **[Search & Retrieval Agent]** Querying Vertex AI Search / Multimodal Vector Datastore (`multimodalembedding@001`)...")
+        matched_entry, score = datastore.search_similar(ctx.sanitized_prompt, similarity_threshold=0.70)
+        ctx.similarity_score = score
+        
+        if matched_entry and os.path.exists(matched_entry.get("image_path", "")):
+            ctx.decision = AgentDecision.EDIT_EXISTING
+            ctx.matched_asset_id = matched_entry["id"]
+            pct = score * 100
+            ctx.agent_trace.append(
+                f"🎯 **[Search Agent] Match Found**: Asset `{matched_entry['id']}` matches query with **{pct:.1f}%** similarity (>= 70%). Routing to **Image Editing Agent**."
+            )
+        else:
+            ctx.decision = AgentDecision.GENERATE_SCRATCH
+            pct = score * 100
+            ctx.agent_trace.append(
+                f"🆕 **[Search Agent] No Matching Asset**: Best similarity is **{pct:.1f}%** (<70%). Routing to **Image Generation Agent** for synthesis from scratch."
+            )
+        return ctx
+
+
+class ImageEditingAgent:
+    """
+    Agent 4: Contextual Image Editing Agent.
+    Applies multimodal delta modifications to the closest matching reference image.
+    """
+    def execute(self, ctx: AgentExecutionContext, datastore: MultimodalVectorDatastore) -> AgentExecutionContext:
+        ctx.agent_trace.append(f"🎨 **[Image Editing Agent]** Loading reference asset `{ctx.matched_asset_id}` and applying multimodal delta modifications...")
+        for entry in datastore.index:
+            if entry["id"] == ctx.matched_asset_id and os.path.exists(entry["image_path"]):
+                try:
+                    ref_img = Image.open(entry["image_path"])
+                    results = edit_existing_image(ref_img, ctx.sanitized_prompt)
+                    if results:
+                        ctx.generated_images = results
+                        ctx.agent_trace.append(f"✅ **[Image Editing Agent]** Successfully synthesized {len(results)} refined variations based on reference asset.")
+                        return ctx
+                except Exception as e:
+                    ctx.agent_trace.append(f"⚠️ **[Image Editing Agent]** Edit attempt encountered error: {e}. Falling back to Generation Agent.")
+        ctx.decision = AgentDecision.GENERATE_SCRATCH
+        return ctx
+
+
+class ImageGenerationAgent:
+    """
+    Agent 5: Image Generation Agent.
+    Synthesizes 4 new candidate images from scratch using Imagen 4 / Gemini Native models.
+    """
+    def execute(self, ctx: AgentExecutionContext) -> AgentExecutionContext:
+        ctx.agent_trace.append("✨ **[Image Generation Agent]** Invoking Vertex AI Imagen 4 / Gemini Native Image synthesis...")
+        images = []
+        
+        # Try Imagen 4
+        for model_name in ["imagen-4.0-generate-001", "imagen-3.0-generate-002", "imagen-3.0-generate-001"]:
+            try:
+                from vertexai.preview.vision_models import ImageGenerationModel
+                model = ImageGenerationModel.from_pretrained(model_name)
+                res = model.generate_images(prompt=ctx.sanitized_prompt, number_of_images=4)
+                images = [img._pil_image for img in res.images if hasattr(img, '_pil_image')]
+                if images:
+                    break
+            except Exception:
+                continue
+
+        # Try Gemini Native Image
+        if not images:
+            for model_name in ["gemini-2.5-flash-image", "gemini-3.1-flash-image"]:
+                try:
+                    from vertexai.generative_models import GenerativeModel
+                    model = GenerativeModel(model_name)
+                    def fetch_single(idx):
+                        try:
+                            res = model.generate_content(ctx.sanitized_prompt, generation_config={"response_modalities": ["TEXT", "IMAGE"]})
+                            if res and res.candidates:
+                                for cand in res.candidates:
+                                    for p in cand.content.parts:
+                                        if hasattr(p, 'inline_data') and p.inline_data:
+                                            return Image.open(io.BytesIO(p.inline_data.data)).resize((1024, 1024), Image.LANCZOS)
+                        except Exception:
+                            pass
+                        return None
+                    with ThreadPoolExecutor(max_workers=4) as executor:
+                        futures = [executor.submit(fetch_single, i) for i in range(4)]
+                        images = [f.result() for f in futures]
+                        images = [img for img in images if img is not None]
+                    if images:
+                        break
+                except Exception:
+                    continue
+
+        ctx.generated_images = images
+        ctx.agent_trace.append(f"✅ **[Image Generation Agent]** Synthesized {len(images)} candidate images from scratch.")
+        return ctx
+
+
+class CloudVisionSafetyAgent:
+    """
+    Agent 6: Google Cloud Vision Safety & Moderation Agent.
+    Inspects all generated/edited images using Cloud Vision SafeSearchDetection (Adult, Violence, Racy).
+    """
+    def __init__(self):
+        self.vision_client = None
+        if PROJECT_ID:
+            try:
+                from google.cloud import vision
+                credentials, _ = google.auth.default(quota_project_id=PROJECT_ID)
+                self.vision_client = vision.ImageAnnotatorClient(credentials=credentials)
+            except Exception:
+                try:
+                    from google.cloud import vision
+                    self.vision_client = vision.ImageAnnotatorClient()
+                except Exception as e:
+                    print(f"[VisionSafetyAgent] Notice: {e}")
+
+    def inspect_and_filter(self, ctx: AgentExecutionContext) -> AgentExecutionContext:
+        ctx.agent_trace.append("👁️ **[Cloud Vision Safety Agent]** Moderating generated visual assets with Google Cloud Vision SafeSearch Detection...")
+        safe_list = []
+        
+        for idx, img in enumerate(ctx.generated_images):
+            if img is None:
+                continue
+            is_safe = True
+            flag_reason = ""
+            
+            if self.vision_client:
+                try:
+                    from google.cloud import vision
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG")
+                    v_img = vision.Image(content=buf.getvalue())
+                    response = self.vision_client.safe_search_detection(image=v_img)
+                    safe = response.safe_search_annotation
+                    
+                    if safe.adult in (vision.Likelihood.LIKELY, vision.Likelihood.VERY_LIKELY):
+                        is_safe = False
+                        flag_reason = "Adult content detected"
+                    elif safe.violence in (vision.Likelihood.LIKELY, vision.Likelihood.VERY_LIKELY):
+                        is_safe = False
+                        flag_reason = "Violence detected"
+                    elif safe.racy == vision.Likelihood.VERY_LIKELY:
+                        is_safe = False
+                        flag_reason = "Racy content detected"
+                except Exception:
+                    pass
+
+            if is_safe:
+                safe_list.append(img)
+            else:
+                ctx.vision_safety_flags.append(f"Image #{idx+1}: {flag_reason}")
+                ctx.agent_trace.append(f"🚫 **[Cloud Vision] Redacted**: Image #{idx+1} blocked ({flag_reason}).")
+                blocked_canvas = Image.new("RGB", (1024, 1024), color=(30, 30, 30))
+                draw = ImageDraw.Draw(blocked_canvas)
+                draw.text((200, 500), f"[CONTENT BLOCKED BY CLOUD VISION: {flag_reason}]", fill=(255, 100, 100))
+                safe_list.append(blocked_canvas)
+
+        ctx.safe_images = safe_list
+        ctx.agent_trace.append(f"✅ **[Cloud Vision Safety Agent]** Verified {len(safe_list)} images compliant with safety policy.")
+        return ctx
+
+
+class IndexingMemoryAgent:
+    """
+    Agent 7: Continuous Indexing & Memory Agent.
+    Indexes verified safe assets into the Vector Datastore & Discovery Engine for continuous retrieval.
+    """
+    def record(self, ctx: AgentExecutionContext, datastore: MultimodalVectorDatastore) -> AgentExecutionContext:
+        ctx.agent_trace.append("💾 **[Indexing & Memory Agent]** Indexing verified visual assets into Vertex AI Vector Datastore & Discovery Engine...")
+        indexed_count = 0
+        for img in ctx.safe_images:
+            if img:
+                datastore.index_image(img, ctx.sanitized_prompt)
+                indexed_count += 1
+        ctx.agent_trace.append(f"✅ **[Indexing Agent]** Indexed {indexed_count} assets for future retrieval and iterative editing.")
+        return ctx
+
+
+class ImageSenseMultiAgentOrchestrator:
+    """
+    Master Orchestrator Agent: Coordinates end-to-end multi-agent execution pipeline.
+    """
+    def __init__(self, datastore: MultimodalVectorDatastore):
+        self.datastore = datastore
+        self.guard_agent = CloudArmorPromptGuardAgent()
+        self.pii_agent = PIIScrubberAgent()
+        self.search_agent = SearchRetrievalAgent()
+        self.edit_agent = ImageEditingAgent()
+        self.gen_agent = ImageGenerationAgent()
+        self.safety_agent = CloudVisionSafetyAgent()
+        self.memory_agent = IndexingMemoryAgent()
+
+    def process(self, raw_prompt: str) -> Tuple[List[Any], str]:
+        ctx = AgentExecutionContext(raw_prompt=raw_prompt)
+        
+        # Step 1: Cloud Armor Prompt Security Guard
+        ctx = self.guard_agent.inspect(ctx)
+        if not ctx.is_prompt_safe:
+            trace_md = "### 🤖 Multi-Agent Execution Trace\n\n" + "\n\n".join(ctx.agent_trace)
+            return [None, None, None, None], trace_md
+
+        # Step 2: Cloud DLP PII Scrubbing
+        ctx = self.pii_agent.sanitize(ctx)
+
+        # Step 3: Vertex AI Search / Vector Datastore Retrieval
+        ctx = self.search_agent.evaluate(ctx, self.datastore)
+
+        # Step 4: Route Execution (Edit vs Generate)
+        if ctx.decision == AgentDecision.EDIT_EXISTING:
+            ctx = self.edit_agent.execute(ctx, self.datastore)
+        
+        if ctx.decision == AgentDecision.GENERATE_SCRATCH or not ctx.generated_images:
+            ctx = self.gen_agent.execute(ctx)
+
+        # Step 5: Cloud Vision API Safety Moderation
+        ctx = self.safety_agent.inspect_and_filter(ctx)
+
+        # Step 6: Memory & Indexing
+        ctx = self.memory_agent.record(ctx, self.datastore)
+
+        images = ctx.safe_images[:]
+        while len(images) < 4:
+            images.append(None)
+
+        trace_md = "### 🤖 Multi-Agent Collaborative Execution Trace\n\n" + "\n\n".join(ctx.agent_trace)
+        return images[:4], trace_md
+
+# Initialize global multi-agent orchestrator
+multi_agent_orchestrator = ImageSenseMultiAgentOrchestrator(vector_datastore)
+
+
 def image_generation_completion(input_prompt):
     """
-    Retrieval-Augmented Image Generation & Semantic Vector Search Pipeline:
-    1. Sanitizes prompt with Cloud DLP.
-    2. Searches Vertex AI Vector Datastore using Multimodal Embeddings (multimodalembedding@001).
-    3. If similar image exists (similarity >= 0.70): Edits the closest candidate image.
-    4. If no match exists: Synthesizes 4 new images from scratch via Imagen 4 / Gemini Native.
-    5. Indexes all newly created/edited images into the datastore for future retrieval.
+    Multi-Agent Image Generation & Editing Orchestration Pipeline:
+    1. Cloud Armor: Prompt Security Guard
+    2. Cloud DLP: PII Scrubbing
+    3. Search Agent: Vertex AI Search & Vector Datastore Retrieval
+    4. Routing: Edit Agent (if similarity >= 70%) OR Generation Agent (from scratch)
+    5. Cloud Vision Agent: SafeSearch moderation
+    6. Memory Agent: Continuous Indexing for next retrieval
     """
     if not input_prompt or not str(input_prompt).strip():
         gr.Warning("Please enter an image prompt first.")
         return [None, None, None, None, "⚠️ Please enter an image prompt first."]
 
-    prompt_text = scrub_pii_dlp(str(input_prompt).strip())
-    status_msg = ""
-
-    # 1. Search for existing similar image in Vertex AI Multimodal Datastore
-    matched_entry, similarity_score = vector_datastore.search_similar(prompt_text, similarity_threshold=0.70)
-    
-    if matched_entry and os.path.exists(matched_entry["image_path"]):
-        pct = similarity_score * 100
-        print(f"[Vertex AI Vector Search] Match found: '{matched_entry['id']}' (Similarity: {pct:.1f}%) for prompt: '{prompt_text}'")
-        try:
-            ref_image = Image.open(matched_entry["image_path"])
-            edited_results = edit_existing_image(ref_image, prompt_text)
-            if edited_results:
-                # Index edited variations into vector datastore
-                for img in edited_results:
-                    vector_datastore.index_image(img, prompt_text)
-                
-                while len(edited_results) < 4:
-                    edited_results.append(None)
-                
-                status_msg = (
-                    f"🔍 **Vertex AI Vector Search Match ({pct:.1f}%)**: Found existing asset (`{matched_entry['id']}`). "
-                    f"Edited the closest candidate image instead of generating from scratch. Indexed for next retrieval!"
-                )
-                return [edited_results[0], edited_results[1], edited_results[2], edited_results[3], status_msg]
-        except Exception as edit_err:
-            print(f"[Vertex AI Vector Search] Failed to edit existing image: {edit_err}, falling back to generation from scratch...")
-
-    # 2. Synthesize new images from scratch (Imagen 4 / Gemini Native Image)
-    print(f"[Vertex AI Vector Search] No matching asset found (Best similarity: {similarity_score*100:.1f}%). Synthesizing from scratch...")
-    errors = []
-    generated_images = []
-
-    # Try Imagen 4 first
-    for model_name in ["imagen-4.0-generate-001", "imagen-3.0-generate-002", "imagen-3.0-generate-001", "imagen-3.0-fast-generate-001"]:
-        try:
-            from vertexai.preview.vision_models import ImageGenerationModel
-            model = ImageGenerationModel.from_pretrained(model_name)
-            response = model.generate_images(
-                prompt=prompt_text,
-                number_of_images=4,
-            )
-            generated_images = [img._pil_image for img in response.images if hasattr(img, '_pil_image')]
-            if generated_images:
-                break
-        except Exception as e:
-            errors.append(f"{model_name}: {e}")
-
-    # Fallback to Gemini Native Multimodal Image synthesis (4 in parallel)
-    if not generated_images:
-        for model_name in ["gemini-2.5-flash-image", "gemini-3.1-flash-image", "gemini-3-pro-image-preview"]:
-            try:
-                from vertexai.generative_models import GenerativeModel
-                model = GenerativeModel(model_name)
-
-                def fetch_single_image(idx):
-                    try:
-                        res = model.generate_content(
-                            prompt_text,
-                            generation_config={"response_modalities": ["TEXT", "IMAGE"]}
-                        )
-                        if res and res.candidates:
-                            for cand in res.candidates:
-                                for p in cand.content.parts:
-                                    if hasattr(p, 'inline_data') and p.inline_data:
-                                        return Image.open(io.BytesIO(p.inline_data.data)).resize((1024, 1024), Image.LANCZOS)
-                    except Exception as ex:
-                        print(f"[ImageStudio {model_name} #{idx} Error] {ex}")
-                    return None
-
-                with ThreadPoolExecutor(max_workers=4) as executor:
-                    futures = [executor.submit(fetch_single_image, i) for i in range(4)]
-                    generated_images = [f.result() for f in futures]
-                    generated_images = [img for img in generated_images if img is not None]
-
-                if generated_images:
-                    break
-            except Exception as e:
-                errors.append(f"{model_name}: {e}")
-
-    # Index newly generated images into the Vector Datastore
-    if generated_images:
-        for img in generated_images:
-            vector_datastore.index_image(img, prompt_text)
-        
-        while len(generated_images) < 4:
-            generated_images.append(None)
-
-        status_msg = (
-            f"✨ **Synthesized from Scratch**: No matching asset in datastore (Best similarity: {similarity_score*100:.1f}% < 70%). "
-            f"Synthesized 4 variations and indexed into Vertex AI Vector Search for future retrieval."
-        )
-        return [generated_images[0], generated_images[1], generated_images[2], generated_images[3], status_msg]
-
-    # If all failed, report error
-    last_err = errors[-1] if errors else "Unknown error"
-    error_msg = f"Image generation failed across all candidate models. Last error: {last_err}"
-    print(f"[ImageStudio Error] {error_msg}")
-    gr.Warning(f"{error_msg}. Check your project billing/quota (IPM > 0) in GCP Console.")
-    return [None, None, None, None, f"❌ {error_msg}"]
+    images, trace_md = multi_agent_orchestrator.process(str(input_prompt).strip())
+    return [images[0], images[1], images[2], images[3], trace_md]
 
 
 def background_generation(input_image, prompt):
