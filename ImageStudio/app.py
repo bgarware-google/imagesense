@@ -851,6 +851,11 @@ class ImageSenseMultiAgentOrchestrator:
         req_id = f"req_{uuid.uuid4().hex[:12]}"
         ctx = AgentExecutionContext(raw_prompt=raw_prompt)
 
+        # AI Lifecycle: A/B Experiment & Variant Assignment
+        from tools.experiment_manager import experiment_manager
+        exp_id, variant_id, variant_cfg = experiment_manager.get_assigned_variant(user_id)
+        ctx.agent_trace.append(f"🧪 **[AI Lifecycle Manager]** Assigned to Experiment: `{exp_id}` (Variant: `{variant_id}`)")
+
         # Pre-execution: FinOps Session Budget Guardrail Check ($0.25 Cap)
         est_preliminary_cost = 0.12  # Standard Imagen 4 (4 variations) estimate
         allowed, current_spend, breaker_reason = session_budget_guardrail.check_and_reserve(user_id, est_preliminary_cost)
