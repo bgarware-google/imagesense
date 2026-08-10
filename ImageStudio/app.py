@@ -51,6 +51,35 @@ else:
     print("[ImageStudio] Notice: GOOGLE_CLOUD_PROJECT is not set. Set it in .env to enable Vertex AI / Imagen generation.")
 
 
+import random
+from functools import wraps
+
+def retry_with_backoff(max_retries: int = 3, base_delay: float = 0.5, max_delay: float = 4.0, jitter: bool = True):
+    """
+    Resilient decorator executing exponential backoff with randomized jitter
+    for transient Google Cloud / Vertex AI API errors (e.g. 429, 503).
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            delay = base_delay
+            last_exception = None
+            for attempt in range(1, max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    if attempt == max_retries:
+                        break
+                    sleep_time = min(max_delay, delay * (2 ** (attempt - 1)))
+                    if jitter:
+                        sleep_time += random.uniform(0, 0.5 * sleep_time)
+                    time.sleep(sleep_time)
+            raise last_exception
+        return wrapper
+    return decorator
+
+
 # ==============================================================================
 # Cloud DLP Automated PII Scrubbing & Data Protection
 # ==============================================================================

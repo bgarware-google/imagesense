@@ -116,6 +116,38 @@ Image Studio is engineered for continuous high availability, automated zone-leve
 
 ---
 
+## 🛡️ Reliability & Resilience Engineering
+
+Image Studio is architected in accordance with Google Cloud SRE and enterprise distributed systems resilience principles:
+
+### 1. 📐 Availability Design & Service Level Objectives (SLOs/SLAs)
+* **High Availability SLA Target**: **99.95% availability** (<21.9 minutes of allowed downtime per month) backed by multi-zone Cloud Run (`us-central1-a, b, c`), Memorystore Redis HA, and multi-region GCS.
+* **Latency SLOs**:
+  * **p50 Latency**: $< 1.5\text{s}$ for vector-cached retrieval and closest-candidate multimodal delta editing.
+  * **p90 Latency**: $< 4.0\text{s}$ for parallel 4-variation Imagen 4 synthesis.
+  * **p99 Latency**: $< 8.0\text{s}$ for the complete end-to-end multi-agent pipeline (Security Guard $\rightarrow$ DLP $\rightarrow$ Search $\rightarrow$ Generation $\rightarrow$ Vision Safety $\rightarrow$ BigQuery FinOps).
+* **Distributed Systems Consistency Models**:
+  * **Eventual Consistency**: Vector datastore embeddings, Discovery Engine document sync, and BigQuery analytical telemetry streams.
+  * **Strong Consistency**: Cloud KMS CMEK encryption state, OAuth 2.0 / OIDC IAM claims, and Cloud Armor security policy enforcement.
+* **Secure Inter-Service Communication**: Encrypted over TLS 1.3 with Cloud Armor WAF and OAuth 2.0 / OIDC Bearer token authentication.
+
+### 2. 🧪 Observability, Failure & Chaos Testing (`tests/resilience_and_chaos_test.py`)
+Image Studio includes a dedicated automated chaos and failure injection testing suite:
+* **Failure Injection**: Simulates Discovery Engine outages, Cloud DLP API network partitions, and transient 503/429 HTTP backpressure.
+* **Red Teaming & Security Resilience**: Injects adversarial jailbreaks (DAN mode, instruction override, SQL injection) verifying deterministic blocking by `CloudArmorPromptGuardAgent`.
+* **Disaster Recovery Validation**: Validates cross-region replication synchronization from primary (`us-central1`) to secondary DR storage (`us-east1`).
+* **Runaway Loop Protection**: Verifies that recursive generation attacks trip the **$0.25 FinOps Circuit Breaker**, halting execution and logging a `CIRCUIT_BREAKER_TRIPPED` audit event.
+
+### 3. ⚡ Graceful Degradation & Fault Tolerance
+* **Multi-Tier Model Fallback**:
+  * Discovery Engine Outage $\rightarrow$ Fallback to local Multimodal Vector Index (`multimodalembedding@001`) $\rightarrow$ Dense SHA-256 projection.
+  * Imagen 4 Rate Limit (429) $\rightarrow$ Fallback to `imagen-3.0-generate-002` $\rightarrow$ Fallback to Gemini Multimodal synthesis (`gemini-2.5-flash-image` / `gemini-3.1-flash-image`).
+* **Cloud DLP Failure Isolation**: Defense-in-depth regex de-identification fallback guarantees **0 PII leakage** even during total Cloud DLP service unavailability.
+* **Exponential Backoff with Jitter**: Vertex AI and GCP API client calls utilize `@retry_with_backoff(max_retries=3, base_delay=0.5s, jitter=True)` to absorb transient network spikes and rate limits.
+* **Timeout Handling**: Strict per-candidate 10-second timeout thresholds prevent cascading thread exhaustion.
+
+---
+
 ## 🔐 Authentication & Authorization
 
 Image Studio enforces an enterprise security architecture adhering to zero-trust and least-privilege principles:
@@ -298,6 +330,8 @@ ImageStudio/
 │       │   ├── dev/                    # Development Environment (us-central1)
 │       │   └── prod/                   # Production Environment (us-central1 HA)
 │       └── modules/                    # Decoupled domains (compute, cache, storage, etc.)
+├── tests/
+│   └── resilience_and_chaos_test.py    # Chaos, failure injection & resilience test suite
 └── README.md                           # Documentation and deployment guide
 ```
 
