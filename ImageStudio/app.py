@@ -758,6 +758,51 @@ class BigQueryTelemetryLogger:
 telemetry_logger = BigQueryTelemetryLogger()
 
 
+# ==============================================================================
+# FinOps Session Budget Guardrail & Automated Circuit Breaker
+# ==============================================================================
+SESSION_BUDGET_CAP_USD = float(os.environ.get("SESSION_BUDGET_CAP_USD", "0.25"))
+
+class SessionBudgetGuardrail:
+    """
+    Enforces real-time FinOps budget guardrails on individual user sessions.
+    Maintains cumulative spend per session and trips an automated circuit breaker
+    if cumulative spend exceeds $0.25 USD, preventing unbounded recursive execution loops.
+    """
+    def __init__(self, budget_cap_usd: float = SESSION_BUDGET_CAP_USD):
+        self.budget_cap_usd = budget_cap_usd
+        self.session_spend: Dict[str, float] = {}
+        self.lock = threading.Lock()
+
+    def check_and_reserve(self, session_id: str, estimated_cost: float) -> Tuple[bool, float, str]:
+        """
+        Validates whether session has remaining budget before execution.
+        Returns (is_allowed, current_spend, reason).
+        """
+        with self.lock:
+            current_spend = self.session_spend.get(session_id, 0.0)
+            if current_spend + estimated_cost > self.budget_cap_usd:
+                reason = (
+                    f"⛔ **FinOps Circuit Breaker Tripped**: Cumulative session spend (${current_spend:.4f} + est. ${estimated_cost:.4f}) "
+                    f"exceeds the hard guardrail budget cap of **${self.budget_cap_usd:.2f} USD**. "
+                    f"Execution halted to prevent unbounded recursive loops and unexpected cloud charges."
+                )
+                return False, current_spend, reason
+            return True, current_spend, ""
+
+    def record_actual_spend(self, session_id: str, actual_cost: float) -> float:
+        with self.lock:
+            self.session_spend[session_id] = self.session_spend.get(session_id, 0.0) + actual_cost
+            return self.session_spend[session_id]
+
+    def get_session_spend(self, session_id: str) -> float:
+        with self.lock:
+            return self.session_spend.get(session_id, 0.0)
+
+# Global Session Budget Guardrail
+session_budget_guardrail = SessionBudgetGuardrail()
+
+
 class ImageSenseMultiAgentOrchestrator:
     """
     Master Orchestrator Agent: Coordinates end-to-end multi-agent execution pipeline.
@@ -776,6 +821,32 @@ class ImageSenseMultiAgentOrchestrator:
         start_time = time.time()
         req_id = f"req_{uuid.uuid4().hex[:12]}"
         ctx = AgentExecutionContext(raw_prompt=raw_prompt)
+
+        # Pre-execution: FinOps Session Budget Guardrail Check ($0.25 Cap)
+        est_preliminary_cost = 0.12  # Standard Imagen 4 (4 variations) estimate
+        allowed, current_spend, breaker_reason = session_budget_guardrail.check_and_reserve(user_id, est_preliminary_cost)
+        if not allowed:
+            latency_ms = (time.time() - start_time) * 1000.0
+            telemetry_logger.log_event({
+                "request_id": req_id,
+                "user_id": user_id,
+                "feature": "image_generation",
+                "model_name": "none",
+                "prompt_tokens": len(raw_prompt.split()),
+                "completion_tokens": 0,
+                "total_tokens": len(raw_prompt.split()),
+                "images_count": 0,
+                "latency_ms": latency_ms,
+                "estimated_cost_usd": 0.0,
+                "action_taken": "CIRCUIT_BREAKER_TRIPPED",
+                "similarity_score": 0.0,
+                "pii_redacted": False,
+                "vision_safe": True,
+                "status": "BLOCKED"
+            })
+            ctx.agent_trace.append(breaker_reason)
+            trace_md = "### 🤖 Multi-Agent Execution Trace\n\n" + "\n\n".join(ctx.agent_trace)
+            return [None, None, None, None], trace_md
         
         # Step 1: Cloud Armor Prompt Security Guard
         ctx = self.guard_agent.inspect(ctx)
@@ -855,8 +926,11 @@ class ImageSenseMultiAgentOrchestrator:
             "status": "SUCCESS"
         })
 
+        # Record actual session spend against FinOps budget cap
+        cum_spend = session_budget_guardrail.record_actual_spend(user_id, est_cost)
+
         ctx.agent_trace.append(
-            f"📊 **[BigQuery FinOps Logger]** Streamed telemetry event (`{req_id}`): {prompt_tokens + completion_tokens} tokens, {images_count} images, {latency_ms:.0f}ms latency, Est. Cost: **${est_cost:.4f} USD**."
+            f"📊 **[BigQuery FinOps Logger]** Streamed telemetry event (`{req_id}`): {prompt_tokens + completion_tokens} tokens, {images_count} images, {latency_ms:.0f}ms latency, Est. Cost: **${est_cost:.4f} USD** (Session Spend: **${cum_spend:.4f}** / **${session_budget_guardrail.budget_cap_usd:.2f}**)."
         )
 
         images = ctx.safe_images[:]

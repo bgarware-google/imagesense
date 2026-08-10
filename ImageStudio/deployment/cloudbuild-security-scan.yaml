@@ -1,0 +1,53 @@
+# ==============================================================================
+# Cloud Build Policy-as-Code & Pre-Deployment Security Scanning Pipeline
+# ==============================================================================
+
+steps:
+  # Step 1: Terraform Linting (tflint)
+  - name: 'ghcr.io/terraform-linters/tflint:latest'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        echo "--> Running TFLint on Terraform modules and environments..."
+        tflint --init
+        tflint --recursive deployment/terraform/
+
+  # Step 2: Static Analysis Security Scanning (tfsec)
+  - name: 'aquasec/tfsec:latest'
+    entrypoint: 'tfsec'
+    args:
+      - 'deployment/terraform/'
+      - '--concise-output'
+      - '--soft-fail'
+
+  # Step 3: Policy-as-Code Compliance & Security Scan (checkov)
+  - name: 'bridgecrew/checkov:latest'
+    entrypoint: 'checkov'
+    args:
+      - '-d'
+      - 'deployment/terraform/'
+      - '--framework'
+      - 'terraform'
+      - '--output'
+      - 'cli'
+      - '--soft-fail'
+
+  # Step 4: Terraform Format and Validation
+  - name: 'hashicorp/terraform:1.7'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        echo "--> Validating Development Environment..."
+        cd deployment/terraform/environments/dev
+        terraform init -backend=false
+        terraform validate
+        
+        echo "--> Validating Production Environment..."
+        cd ../prod
+        terraform init -backend=false
+        terraform validate
+
+options:
+  logging: CLOUD_LOGGING_ONLY

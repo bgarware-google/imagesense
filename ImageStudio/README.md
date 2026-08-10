@@ -74,6 +74,28 @@ Image Studio automatically streams rich runtime execution telemetry, token consu
 
 ---
 
+## 🏛️ Compliance & Governance
+
+Image Studio implements an enterprise compliance and governance framework across four critical operational pillars:
+
+### 1. 💰 FinOps Governance & Session Budget Enforcement
+* **Real-Time Streaming Telemetry**: Telemetry streaming directly into BigQuery tracking token consumption, compute cost, and latency per request.
+* **Automated Circuit Breaker ($0.25 Cap)**: Programmed strict session budget guardrails with an automated circuit breaker capping individual session spend at **$0.25 USD**, halting execution when exceeded to prevent unbounded recursive execution loops and unexpected cloud charges.
+
+### 2. 📋 Comprehensive Cloud Audit Logging (SOC 2, ISO 27001)
+* **Complete Audit Coverage**: Enabled Admin Activity, Data Access, and System Event audit logs across all VPC-SC enclosed resources (`allServices`), creating tamper-proof audit trails for enterprise compliance (SOC 2, ISO 27001).
+* **Immutable Storage Sink**: Configured dedicated audit log sink routing to CMEK-encrypted GCS buckets with 30-day retention locks (`retention_policy`).
+
+### 3. 🔍 Policy-as-Code & Pre-Deployment Scanning
+* **7 Decoupled Terraform Domains**: Declarative security standards partitioned across 7 decoupled Terraform domains (`networking`, `security`, `compute`, `storage`, `iam`, `messaging`, `cache`).
+* **Automated CI/CD Scanning**: Integrated automated pre-deployment scanning via **`checkov`**, **`tfsec`**, and **`tflint`** in Cloud Build pipelines (`cloudbuild-security-scan.yaml`).
+
+### 4. 🌍 Strict Regional Data Residency & Immutability
+* **Strict Regional Pinning**: Enforced strict regional data residency pinned to **`us-central1`** across compute, storage, KMS, and Vertex AI workloads.
+* **Zero Configuration Drift**: Fully parameterized `environments/dev/` and `environments/prod/` configurations ensuring zero configuration drift between development and production.
+
+---
+
 ## 🔐 Authentication & Authorization
 
 Image Studio enforces an enterprise security architecture adhering to zero-trust and least-privilege principles:
