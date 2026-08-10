@@ -68,8 +68,6 @@ flowchart TD
 │   ├── webapp/                             # Web Application Frontend (HTML, CSS, JS)
 │   ├── assets/                             # Sample person and garment reference imagery
 │   └── tests/                              # Unit, integration, and response quality tests
-│
-├── PRD.pdf                                 # Product Requirements Document
 └── README.md                               # Root repository documentation
 ```
 
