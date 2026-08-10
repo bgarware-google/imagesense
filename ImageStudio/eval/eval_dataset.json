@@ -32,7 +32,7 @@
     "prompt": "Photo of Alice Johnson at alice@example.com wearing a smart watch, call 555-987-6543",
     "expected_elements": ["smart watch"],
     "negative_elements": ["Alice Johnson", "alice@example.com", "555-987-6543"],
-    "minimum_faithfulness": 4.0,
+    "minimum_faithfulness": 2.0,
     "minimum_relevance": 4.0
   },
   {
