@@ -176,6 +176,38 @@ Image Studio is engineered to deliver maximum throughput, sub-second latency, an
 
 ---
 
+## 🔬 LLM Ops, Evaluation & Observability Architecture
+
+Image Studio incorporates an enterprise-grade LLM Ops Quality Flywheel combining automated LLM-as-a-Judge scoring, regression detection CI/CD quality gates, and distributed observability:
+
+### 1. 🎯 Generative AI Evaluation Methodology & Quality Flywheel
+* **Closed-Loop Quality Flywheel**: Continuous benchmark evaluation against golden evaluation datasets (`eval/eval_dataset.json`) to validate visual fidelity, style accuracy, and prompt compliance before deployment.
+* **Core Quality Evaluation Metrics**:
+  * **Faithfulness (1.0 – 5.0)**: Strict factual accuracy and adherence to user-specified product constraints without hallucinating conflicting visual details.
+  * **Relevance (1.0 – 5.0)**: Semantic and aesthetic alignment with subject, lighting, environment, and commercial advertising theme.
+  * **Coherence (1.0 – 5.0)**: Spatial composition, perspective consistency, shadow photorealism, and absence of visual artifacts.
+  * **Safety & Policy Adherence (PASS / FAIL)**: 100% compliance with Google Cloud Vision SafeSearch (zero adult/violence/racy content).
+
+### 2. 👥 Human vs. Automated Evaluation (LLM-as-a-Judge)
+* **Automated Multimodal Judge (`eval/eval_judge.py`)**:
+  - Leverages **Gemini 2.5 Flash** as an automated multimodal evaluator scoring generated imagery against structured rubrics in seconds.
+* **Human-in-the-Loop (HITL) Calibration**:
+  - Side-by-side human review interface in Gradio for creative directors to calibrate and ground-truth automated LLM judge scoring prompts.
+
+### 3. 🚨 Regression Detection & CI/CD Quality Gates (`eval/run_eval.py`)
+* **Automated Quality Gates**: Integrated into Cloud Build CI/CD pipelines.
+* **Build Failure Thresholds**: Automatically blocks deployment (Exit Code 1) if average Faithfulness or Relevance scores drop below `4.0 / 5.0`, or if any adversarial prompt escapes the security guard.
+
+### 4. 📡 Observability: Distributed Tracing, Logging & Analytics
+* **Distributed Tracing (Google Cloud Trace & OpenTelemetry)**:
+  - Generates trace spans across all 7 agents: `[PromptGuard] -> [PIIScrubber] -> [SearchRetrieval] -> [ImageGen/Edit] -> [VisionSafety] -> [IndexingMemory]`.
+* **Structured Cloud Logging**:
+  - Centralized audit trails with automated PII masking and structured JSON payloads.
+* **BigQuery Agent Analytics (`imagesense_telemetry.finops_telemetry_logs`)**:
+  - Real-time streaming of token consumption, latency SLA benchmarks (p50/p90/p99), compute cost in USD, and evaluation scores.
+
+---
+
 ## 🔐 Authentication & Authorization
 
 Image Studio enforces an enterprise security architecture adhering to zero-trust and least-privilege principles:
@@ -361,6 +393,11 @@ ImageStudio/
 │       └── modules/                    # Decoupled domains (compute, cache, storage, etc.)
 ├── tests/
 │   └── resilience_and_chaos_test.py    # Chaos, failure injection & resilience test suite
+├── eval/
+│   ├── eval_dataset.json               # Golden benchmark evaluation dataset
+│   ├── eval_judge.py                   # LLM-as-a-Judge multimodal evaluator (Gemini 2.5)
+│   ├── run_eval.py                     # Automated eval runner & CI/CD regression detector
+│   └── README.md                       # Quality Flywheel & LLM Ops documentation
 └── README.md                           # Documentation and deployment guide
 ```
 
